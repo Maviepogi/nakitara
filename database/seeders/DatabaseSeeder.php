@@ -22,9 +22,29 @@ class DatabaseSeeder extends Seeder
 
         // Create categories
         $categories = [
-            'Electronics', 'Clothing', 'Accessories', 'Documents', 
-            'Keys', 'Bags', 'Jewelry', 'Books', 'Other'
-        ];
+    'Electronics',
+    'Clothing',
+    'Accessories',
+    'Documents',
+    'Keys',
+    'Bags',
+    'Jewelry',
+    'Books',
+    'Wallets',
+    'Toys',
+    'Sports Equipment',
+    'Animals',
+    'Gadgets',
+    'Eyewear',
+    'Footwear',
+    'Medical Equipment',
+    'Musical Instruments',
+    'Tools',
+    'Household Items',
+    'Art Supplies',
+    'Others',
+];
+
 
         foreach ($categories as $category) {
             Category::create(['name' => $category]);

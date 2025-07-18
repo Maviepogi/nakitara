@@ -1,4 +1,5 @@
 <?php
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -14,6 +15,11 @@ return new class extends Migration
             $table->foreignId('owner_id')->constrained('users')->onDelete('cascade');
             $table->text('story');
             $table->timestamps();
+            
+            // Add indexes for better performance
+            $table->index(['item_id', 'created_at']);
+            $table->index('finder_id');
+            $table->index('owner_id');
         });
     }
 

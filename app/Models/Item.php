@@ -1,35 +1,45 @@
 <?php
+
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Item extends Model
 {
-    use HasFactory;
-
     protected $fillable = [
-        'title', 'description', 'type', 'location', 'latitude', 'longitude',
-        'image', 'status', 'user_id', 'category_id'
+        'title',
+        'description',
+        'type',
+        'location',
+        'latitude',
+        'longitude',
+        'images',
+        'status',
+        'user_id',
+        'category_id'
     ];
 
-    public function user()
+    protected $casts = [
+        'images' => 'array', // This handles JSON conversion automatically
+    ];
+
+    // Accessor for backward compatibility - get first image
+    public function getImageAttribute()
+    {
+        return $this->images && count($this->images) > 0 ? $this->images[0] : null;
+    }
+
+    // Remove the conflicting getImagesAttribute method
+    // The 'images' => 'array' cast handles this automatically
+
+    public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }
 
-    public function category()
+    public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
-    }
-
-    public function messages()
-    {
-        return $this->hasMany(Message::class);
-    }
-
-    public function successStory()
-    {
-        return $this->hasOne(SuccessStory::class);
     }
 }

@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -9,7 +10,15 @@ class SuccessStory extends Model
     use HasFactory;
 
     protected $fillable = [
-        'item_id', 'finder_id', 'owner_id', 'story'
+        'item_id',
+        'finder_id',
+        'owner_id',
+        'story'
+    ];
+
+    protected $casts = [
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     public function item()

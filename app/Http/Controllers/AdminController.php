@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Controllers;
 
 use App\Models\User;
@@ -73,6 +74,60 @@ class AdminController extends Controller
         return view('admin.users', compact('users'));
     }
 
+    public function showUser(User $user)
+    {
+        $user->load(['items', 'logs']);
+        LogService::log('admin_user_viewed', 'Admin viewed user details', ['user_id' => $user->id]);
+        return view('admin.user-show', compact('user'));
+    }
+
+    public function editUser(User $user)
+    {
+        LogService::log('admin_user_edit_form', 'Admin accessed user edit form', ['user_id' => $user->id]);
+        return view('admin.user-edit', compact('user'));
+    }
+
+    public function updateUser(Request $request, User $user)
+    {
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|string|email|max:255|unique:users,email,' . $user->id,
+            'is_admin' => 'nullable|boolean',
+        ]);
+
+        // Handle checkbox: if not present, it means unchecked (false)
+        $isAdmin = $request->has('is_admin') ? (bool)$request->is_admin : false;
+
+        $user->update([
+            'name' => $request->name,
+            'email' => $request->email,
+            'is_admin' => $isAdmin,
+        ]);
+
+        LogService::log('admin_user_updated', 'Admin updated user', [
+            'user_id' => $user->id,
+            'changes' => [
+                'name' => $request->name,
+                'email' => $request->email,
+                'is_admin' => $isAdmin
+            ]
+        ]);
+
+        return redirect()->route('admin.users')->with('success', 'User updated successfully!');
+    }
+
+    public function destroyUser(User $user)
+    {
+        if ($user->is_admin) {
+            return redirect()->route('admin.users')->with('error', 'Cannot delete admin user!');
+        }
+
+        LogService::log('admin_user_deleted', 'Admin deleted user', ['user_id' => $user->id]);
+        $user->delete();
+
+        return redirect()->route('admin.users')->with('success', 'User deleted successfully!');
+    }
+
     public function items()
     {
         $items = Item::with(['user', 'category'])->latest()->paginate(10);
@@ -83,17 +138,22 @@ class AdminController extends Controller
     public function successStories()
     {
         $stories = SuccessStory::with(['item', 'finder', 'owner'])->latest()->paginate(10);
-        return view('admin.success-stories', compact('stories'));
+        $claimedItems = Item::with('user')
+            ->where('status', 'claimed')
+            ->whereNotIn('id', SuccessStory::pluck('item_id'))
+            ->get();
+
+        return view('admin.success-stories', compact('stories', 'claimedItems'));
     }
 
     public function downloadSuccessStories()
     {
         $stories = SuccessStory::with(['item', 'finder', 'owner'])->get();
-        
+
         LogService::log('admin_pdf_downloaded', 'Admin downloaded success stories PDF', [
             'stories_count' => $stories->count()
         ]);
-        
+
         $pdf = Pdf::loadView('admin.success-stories-pdf', compact('stories'));
         return $pdf->download('success-stories.pdf');
     }
@@ -116,5 +176,17 @@ class AdminController extends Controller
         ]);
 
         return redirect()->route('admin.success-stories')->with('success', 'Success story created!');
+    }
+
+    public function destroySuccessStory(SuccessStory $story)
+    {
+        LogService::log('success_story_deleted', 'Admin deleted success story', [
+            'story_id' => $story->id,
+            'item_id' => $story->item_id
+        ]);
+
+        $story->delete();
+
+        return redirect()->route('admin.success-stories')->with('success', 'Success story deleted!');
     }
 }

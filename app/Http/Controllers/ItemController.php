@@ -1,18 +1,24 @@
 <?php
+
 namespace App\Http\Controllers;
 
 use App\Models\Item;
+use App\Models\User;
 use App\Models\Category;
+use App\Models\SuccessStory;
 use App\Services\LogService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
-
-use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Support\Facades\Validator;
 
 class ItemController extends Controller
 {
-    use AuthorizesRequests;
+    public function __construct()
+    {
+        $this->middleware('auth');
+    }
+
     public function index()
     {
         $items = Item::where('user_id', Auth::id())->with('category')->latest()->paginate(10);
@@ -25,40 +31,45 @@ class ItemController extends Controller
         return view('items.create', compact('categories'));
     }
 
-  public function store(Request $request)
-{
-    $request->validate([
-        'title' => 'required|string|max:255',
-        'description' => 'required|string',
-        'type' => 'required|in:lost,found',
-        'location' => 'required|string|max:255',
-        'category_id' => 'required|exists:categories,id',
-        'image' => 'nullable|image|max:2048',
-    ]);
+    public function store(Request $request)
+    {
+        $request->validate([
+            'title' => 'required|string|max:255',
+            'description' => 'required|string',
+            'type' => 'required|in:lost,found',
+            'location' => 'required|string|max:255',
+            'category_id' => 'required|exists:categories,id',
+            'images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048', // Multiple images
+        ]);
 
-    $data = $request->all();
-    $data['user_id'] = Auth::id();
-    $data['status'] = 'active'; // Set default status for new items
+        $data = $request->all();
+        $data['user_id'] = Auth::id();
 
-    if ($request->hasFile('image')) {
-        $data['image'] = $request->file('image')->store('items', 'public');
+        $imagePaths = [];
+        
+        // Handle multiple image uploads
+        if ($request->hasFile('images')) {
+            foreach ($request->file('images') as $image) {
+                $imagePath = $image->store('items', 'public');
+                $imagePaths[] = $imagePath;
+            }
+        }
+        
+        $data['images'] = $imagePaths;
+
+        $item = Item::create($data);
+
+        LogService::log('item_created', 'User created new item', [
+            'item_id' => $item->id,
+            'type' => $item->type
+        ]);
+
+        return redirect()->route('items.index')->with('success', 'Item created successfully!');
     }
-
-    $item = Item::create($data);
-
-    LogService::log('item_created', 'Created new item', [
-        'item_id' => $item->id,
-        'title' => $item->title,
-        'type' => $item->type
-    ]);
-
-    return redirect()->route('items.index')->with('success', 'Item posted successfully!');
-}
 
     public function show(Item $item)
     {
-        $item->load(['user', 'category']);
-        LogService::log('item_viewed', 'Viewed item', ['item_id' => $item->id, 'title' => $item->title]);
+        $item->load('category', 'user');
         return view('items.show', compact('item'));
     }
 
@@ -73,32 +84,66 @@ class ItemController extends Controller
     {
         $this->authorize('update', $item);
 
-        $request->validate([
+        $rules = [
             'title' => 'required|string|max:255',
             'description' => 'required|string',
             'type' => 'required|in:lost,found',
             'location' => 'required|string|max:255',
             'category_id' => 'required|exists:categories,id',
-            'image' => 'nullable|image|max:2048',
             'status' => 'required|in:active,claimed,closed',
-        ]);
+            'images.*' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'remove_images' => 'nullable|array', // For removing specific images
+            'remove_images.*' => 'string',
+        ];
 
-        $oldData = $item->only(['title', 'status', 'type']);
-        $data = $request->all();
-
-        if ($request->hasFile('image')) {
-            if ($item->image) {
-                Storage::disk('public')->delete($item->image);
-            }
-            $data['image'] = $request->file('image')->store('items', 'public');
+        // Add validation for success story fields if status is claimed
+        if ($request->status === 'claimed') {
+            $rules['finder_name'] = 'required|string|max:255';
+            $rules['finder_email'] = 'required|email|max:255';
+            $rules['success_story'] = 'required|string|min:10';
         }
+
+        $request->validate($rules);
+
+        $data = $request->only(['title', 'description', 'type', 'location', 'category_id', 'status']);
+
+        // Handle image updates
+        $currentImages = $item->images ?? [];
+        
+        // Remove selected images
+        if ($request->has('remove_images')) {
+            foreach ($request->remove_images as $imageToRemove) {
+                if (($key = array_search($imageToRemove, $currentImages)) !== false) {
+                    // Delete file from storage
+                    Storage::disk('public')->delete($imageToRemove);
+                    unset($currentImages[$key]);
+                }
+            }
+            $currentImages = array_values($currentImages); // Re-index array
+        }
+        
+        // Add new images
+        if ($request->hasFile('images')) {
+            foreach ($request->file('images') as $image) {
+                if (count($currentImages) < 5) { // Limit to 5 images
+                    $imagePath = $image->store('items', 'public');
+                    $currentImages[] = $imagePath;
+                }
+            }
+        }
+        
+        $data['images'] = $currentImages;
 
         $item->update($data);
 
-        LogService::log('item_updated', 'Updated item', [
+        // Create success story if status is claimed and story details are provided
+        if ($request->status === 'claimed' && $request->filled(['finder_name', 'finder_email', 'success_story'])) {
+            $this->createSuccessStory($item, $request);
+        }
+
+        LogService::log('item_updated', 'User updated item', [
             'item_id' => $item->id,
-            'title' => $item->title,
-            'changes' => array_diff_assoc($data, $oldData)
+            'status' => $item->status
         ]);
 
         return redirect()->route('items.index')->with('success', 'Item updated successfully!');
@@ -108,18 +153,54 @@ class ItemController extends Controller
     {
         $this->authorize('delete', $item);
 
-        if ($item->image) {
-            Storage::disk('public')->delete($item->image);
+        // Delete all images if they exist
+        if ($item->images) {
+            foreach ($item->images as $image) {
+                Storage::disk('public')->delete($image);
+            }
         }
 
-        LogService::log('item_deleted', 'Deleted item', [
-            'item_id' => $item->id,
-            'title' => $item->title,
-            'type' => $item->type
+        LogService::log('item_deleted', 'User deleted item', [
+            'item_id' => $item->id
         ]);
 
         $item->delete();
 
         return redirect()->route('items.index')->with('success', 'Item deleted successfully!');
+    }
+
+    private function createSuccessStory(Item $item, Request $request)
+    {
+        // Check if success story already exists for this item
+        if ($item->successStory) {
+            return;
+        }
+
+        // Find or create finder user
+        $finder = User::where('email', $request->finder_email)->first();
+        
+        if (!$finder) {
+            // Create a basic user record for the finder
+            $finder = User::create([
+                'name' => $request->finder_name,
+                'email' => $request->finder_email,
+                'password' => bcrypt('temp_password_' . time()), // Temporary password
+                'email_verified_at' => now(), // Auto-verify since admin is creating
+            ]);
+        }
+
+        // Create success story
+        SuccessStory::create([
+            'item_id' => $item->id,
+            'finder_id' => $finder->id,
+            'owner_id' => $item->user_id,
+            'story' => $request->success_story,
+        ]);
+
+        LogService::log('success_story_created', 'Success story created via item update', [
+            'item_id' => $item->id,
+            'finder_id' => $finder->id,
+            'owner_id' => $item->user_id
+        ]);
     }
 }

@@ -23,7 +23,7 @@ class ItemPolicy
      */
     public function view(User $user, Item $item)
     {
-        return true;
+        return true; // Anyone can view items
     }
 
     /**
@@ -31,7 +31,7 @@ class ItemPolicy
      */
     public function create(User $user)
     {
-        return true;
+        return true; // Any authenticated user can create items
     }
 
     /**
